@@ -2,6 +2,8 @@ FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+# Accept Coqui TOS non-interactively
+ENV COQUI_TOS_AGREED=1
 
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
