@@ -16,45 +16,82 @@ print("Using device:", DEVICE)
 # -------------------------
 tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(DEVICE)
 
+# Optional FP16 for speed (safe on modern GPUs)
+if DEVICE == "cuda":
+    tts.tts_model = tts.tts_model.half()
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+# -------------------------
+# Resolve default speaker (built-in)
+# -------------------------
+speaker_manager = tts.synthesizer.tts_model.speaker_manager
+speaker_keys = list(speaker_manager.name_to_id.keys())
+DEFAULT_SPEAKER = speaker_keys[0] if speaker_keys else None
+
+print("Resolved default speaker:", DEFAULT_SPEAKER)
+
+# Warm up model once (important for serverless latency)
+if DEFAULT_SPEAKER:
+    _ = tts.tts(
+        text="warmup",
+        speaker=DEFAULT_SPEAKER,
+        language="en"
+    )
+    if DEVICE == "cuda":
+        torch.cuda.synchronize()
+
 # -------------------------
 # RunPod handler
 # -------------------------
 def handler(event):
     """
-    Supported request formats:
+    Supported input:
 
     {
       "input": {
-        "text": "Hello world"
-      }
-    }
-
-    OR
-
-    {
-      "input": {
-        "prompt": "Hello world"
+        "text": "Hello world",
+        "language": "en",
+        "speaker_wav": "/optional/path/to.wav"
       }
     }
     """
 
     input_data = event.get("input", {})
 
-    # ✅ Accept BOTH `text` and `prompt`
     text = input_data.get("text") or input_data.get("prompt")
+    language = input_data.get("language", "en")
+    speaker_wav = input_data.get("speaker_wav")  # optional
 
     if not text or not isinstance(text, str):
         return {
-            "error": "Missing or invalid 'text' or 'prompt' field in input."
+            "error": "Missing or invalid 'text' or 'prompt' field."
         }
 
-    # ✅ XTTS v2 requires language
-    wav = tts.tts(
-        text=text,
-        language="en"
-    )
+    # -------------------------
+    # Speaker selection logic
+    # Priority:
+    #   1) speaker_wav (voice cloning)
+    #   2) built-in default speaker
+    # -------------------------
+    if speaker_wav:
+        wav = tts.tts(
+            text=text,
+            language=language,
+            speaker_wav=speaker_wav
+        )
+        speaker_used = "speaker_wav"
+    else:
+        wav = tts.tts(
+            text=text,
+            language=language,
+            speaker=DEFAULT_SPEAKER
+        )
+        speaker_used = DEFAULT_SPEAKER
 
-    # ✅ Encode WAV to Base64 in memory (XTTS = 24kHz)
+    # -------------------------
+    # Encode WAV → Base64
+    # -------------------------
     buffer = io.BytesIO()
     sf.write(buffer, wav, samplerate=24000, format="WAV")
 
@@ -62,7 +99,8 @@ def handler(event):
         "audio_base64": base64.b64encode(buffer.getvalue()).decode("utf-8"),
         "sample_rate": 24000,
         "format": "wav",
-        "model": "xtts_v2"
+        "model": "xtts_v2",
+        "speaker": speaker_used
     }
 
 # -------------------------
