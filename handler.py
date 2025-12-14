@@ -18,7 +18,6 @@ tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(DEVICE)
 
 # Optional FP16 for speed (safe on modern GPUs)
 if DEVICE == "cuda":
-    tts.tts_model = tts.tts_model.half()
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
