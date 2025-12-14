@@ -27,8 +27,8 @@ RUN pip install -r requirements.txt
 
 RUN python - <<EOF
 from TTS.api import TTS
-TTS("tts_models/en/ljspeech/fast_pitch")
-print("FastPitch model cached successfully")
+TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+print("XTTS v2 model cached successfully")
 EOF
 
 COPY handler.py .
