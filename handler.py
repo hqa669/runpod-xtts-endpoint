@@ -12,9 +12,9 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using device:", DEVICE)
 
 # -------------------------
-# Load FastPitch model ONCE
+# Load XTTS v2 model ONCE
 # -------------------------
-tts = TTS("tts_models/en/ljspeech/fast_pitch").to(DEVICE)
+tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(DEVICE)
 
 # -------------------------
 # RunPod handler
@@ -48,18 +48,21 @@ def handler(event):
             "error": "Missing or invalid 'text' or 'prompt' field in input."
         }
 
-    # ✅ Generate speech
-    wav = tts.tts(text)
+    # ✅ XTTS v2 requires language
+    wav = tts.tts(
+        text=text,
+        language="en"
+    )
 
-    # ✅ Encode WAV to Base64 in memory
+    # ✅ Encode WAV to Base64 in memory (XTTS = 24kHz)
     buffer = io.BytesIO()
-    sf.write(buffer, wav, samplerate=22050, format="WAV")
+    sf.write(buffer, wav, samplerate=24000, format="WAV")
 
     return {
         "audio_base64": base64.b64encode(buffer.getvalue()).decode("utf-8"),
-        "sample_rate": 22050,
+        "sample_rate": 24000,
         "format": "wav",
-        "model": "fast_pitch"
+        "model": "xtts_v2"
     }
 
 # -------------------------
