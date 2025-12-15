@@ -36,4 +36,11 @@ EOF
 
 COPY handler.py .
 
+# -------------------------
+# Copy default XTTS speaker WAV
+# -------------------------
+RUN mkdir -p /app/voices
+COPY voices/default.wav /app/voices/default.wav
+
+
 CMD ["python", "handler.py"]
