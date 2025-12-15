@@ -4,6 +4,7 @@ import io
 import base64
 import soundfile as sf
 from TTS.api import TTS
+import os
 
 # -------------------------
 # Device setup
@@ -14,31 +15,38 @@ print("Using device:", DEVICE)
 # -------------------------
 # Load XTTS v2 model ONCE
 # -------------------------
-tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(DEVICE)
+tts = TTS(
+    model_name="tts_models/multilingual/multi-dataset/xtts_v2",
+    progress_bar=False,
+    gpu=DEVICE == "cuda",
+)
 
-# Optional FP16 for speed (safe on modern GPUs)
+# CUDA tuning (safe)
 if DEVICE == "cuda":
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
 # -------------------------
-# Resolve default speaker (built-in)
+# Default speaker WAV (REQUIRED for XTTS)
 # -------------------------
-speaker_manager = tts.synthesizer.tts_model.speaker_manager
-speaker_keys = list(speaker_manager.name_to_id.keys())
-DEFAULT_SPEAKER = speaker_keys[0] if speaker_keys else None
+DEFAULT_SPEAKER_WAV = "/app/voices/default.wav"
 
-print("Resolved default speaker:", DEFAULT_SPEAKER)
+if not os.path.exists(DEFAULT_SPEAKER_WAV):
+    raise RuntimeError(f"Default speaker wav not found: {DEFAULT_SPEAKER_WAV}")
 
-# Warm up model once (important for serverless latency)
-if DEFAULT_SPEAKER:
-    _ = tts.tts(
-        text="warmup",
-        speaker=DEFAULT_SPEAKER,
-        language="en"
-    )
-    if DEVICE == "cuda":
-        torch.cuda.synchronize()
+# -------------------------
+# Warm up model (XTTS requires speaker_wav)
+# -------------------------
+_ = tts.tts(
+    text="warmup",
+    speaker_wav=DEFAULT_SPEAKER_WAV,
+    language="en",
+)
+
+if DEVICE == "cuda":
+    torch.cuda.synchronize()
+
+print("XTTS warmup complete")
 
 # -------------------------
 # RunPod handler
@@ -60,37 +68,20 @@ def handler(event):
 
     text = input_data.get("text") or input_data.get("prompt")
     language = input_data.get("language", "en")
-    speaker_wav = input_data.get("speaker_wav")  # optional
+    speaker_wav = input_data.get("speaker_wav") or DEFAULT_SPEAKER_WAV
 
     if not text or not isinstance(text, str):
-        return {
-            "error": "Missing or invalid 'text' or 'prompt' field."
-        }
+        return {"error": "Missing or invalid 'text' or 'prompt' field."}
 
-    # -------------------------
-    # Speaker selection logic
-    # Priority:
-    #   1) speaker_wav (voice cloning)
-    #   2) built-in default speaker
-    # -------------------------
-    if speaker_wav:
-        wav = tts.tts(
-            text=text,
-            language=language,
-            speaker_wav=speaker_wav
-        )
-        speaker_used = "speaker_wav"
-    else:
-        wav = tts.tts(
-            text=text,
-            language=language,
-            speaker=DEFAULT_SPEAKER
-        )
-        speaker_used = DEFAULT_SPEAKER
+    if not os.path.exists(speaker_wav):
+        return {"error": f"Speaker wav not found: {speaker_wav}"}
 
-    # -------------------------
-    # Encode WAV → Base64
-    # -------------------------
+    wav = tts.tts(
+        text=text,
+        speaker_wav=speaker_wav,
+        language=language,
+    )
+
     buffer = io.BytesIO()
     sf.write(buffer, wav, samplerate=24000, format="WAV")
 
@@ -99,10 +90,10 @@ def handler(event):
         "sample_rate": 24000,
         "format": "wav",
         "model": "xtts_v2",
-        "speaker": speaker_used
+        "speaker_wav": speaker_wav,
     }
 
 # -------------------------
-# IMPORTANT: block forever
+# Start RunPod serverless
 # -------------------------
 runpod.serverless.start({"handler": handler})
